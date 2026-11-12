@@ -1,7 +1,7 @@
 [whisper]
 model = "small"      # tiny, base, small, medium, large-v3 (gpu also large-v3-turbo); cpu also quantized e.g. "small-q8_0" (faster)
 backend = "gpu"      # "gpu" = Intel GPU via OpenVINO (~3x faster); "cpu" = whisper.cpp on the processor
-language = ""      # "" = auto-detect; "de" or "en" etc. (changeable in the live window)
+language = "en"     # "en" = English (default); "" = auto-detect; "de" etc. (changeable in the live window)
 redetect_every = 1   # auto-detect: detect language every N chunks (1 = every chunk; 5 = faster)
 beam_size = 1        # 1 = fastest (greedy); 5 = slightly more accurate
 cpu_threads = 0      # 0 = automatic

@@ -27,7 +27,8 @@ Rust port of the Python tray app in `../verba.old/python`.
   playing) at the same time, with no meeting bot or plugin.
 - **Whisper on the Intel GPU** via OpenVINO GenAI (about 1.3 s per 10 s of speech, with language auto-detection),
   with automatic **whisper.cpp CPU fallback**. A badge shows which engine is running, and why if it fell back.
-- Automatic language detection, or a fixed language (German, English, French, Spanish, Italian, …).
+- English by default; switch to automatic language detection or another language (German, French, Spanish,
+  Italian, …) in the window.
 - Filters Whisper's typical made-up text on silence (`[INAUDIBLE]`, "Thank you for watching", …) and the speaker
   echo picked up by the microphone.
 - Optional grey live preview while someone is still speaking.
