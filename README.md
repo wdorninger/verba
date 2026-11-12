@@ -2,7 +2,7 @@
   <img src="docs/icon.svg" width="96" height="96" alt="Transcribe icon">
 </p>
 
-<h1 align="center">Transcribe</h1>
+<h1 align="center">Verba - Transcribe</h1>
 
 <p align="center">
   Local, private call transcription for Windows: a tray app that writes down what you and the other side say,
