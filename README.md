@@ -170,6 +170,10 @@ How the app calls it:
 - `"gpu"` (default): OpenVINO GenAI on the Intel GPU through its C API, the same engine and model as the Python version and the same speed (about 1.3 s for 10 s of speech with language auto-detection). A Silero speech check skips silent chunks.
 - `"cpu"`: whisper.cpp with the 8-bit quantized model (`small` → `small-q8_0`, about twice as fast at practically the same accuracy). Also used automatically when the GPU backend can't start; the badge then says *fallback* and the window shows why. Language auto-detection doubles its cost, so set a language if you can. When it falls more than `catchup_seconds` behind, it temporarily switches to `base-q8_0`.
 
+The GPU backend needs an Intel GPU with the Intel graphics driver installed: the driver provides `OpenCL.dll`, the
+only library the bundled `openvino\` folder doesn't bring itself. Without it the app runs on the CPU and the
+badge shows why. The backend is chosen at start, so restart the app after installing a driver or changing it.
+
 `build.rs` copies the OpenVINO runtime (set up by `setup-openvino.ps1`) and the VC++ runtime into `target\<profile>\openvino`, so every build uses the GPU, not only `dist`.
 
 ## Build
