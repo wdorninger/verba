@@ -1,0 +1,58 @@
+[whisper]
+model = "small"      # tiny, base, small, medium, large-v3 (gpu also large-v3-turbo); cpu also quantized e.g. "small-q8_0" (faster)
+backend = "gpu"      # "gpu" = Intel GPU via OpenVINO (~3x faster); "cpu" = whisper.cpp on the processor
+language = ""      # "" = auto-detect; "de" or "en" etc. (changeable in the live window)
+redetect_every = 1   # auto-detect: detect language every N chunks (1 = every chunk; 5 = faster)
+beam_size = 1        # 1 = fastest (greedy); 5 = slightly more accurate
+cpu_threads = 0      # 0 = automatic
+catchup_seconds = 30 # cpu only: if this far behind, use the fast "base" model until caught up
+
+[capture]
+mic = true           # [Me]
+speakers = true      # [Them] — everything played through the default output device
+calls_only = false   # always "All audio" at startup; "Only calls" (record only while an app uses the mic) can be chosen per session
+
+[segmenter]
+silence_seconds = 0.8     # pause length that ends a chunk (lower = faster, but more mid-sentence cuts)
+max_chunk_seconds = 15.0  # hard cut for continuous speech
+min_speech_seconds = 0.4  # ignore shorter blips
+min_rms = 0.005           # absolute loudness floor for "speech"
+noise_ratio = 3.0         # speech must be this much louder than learned background noise
+
+[output]
+directory = "transcripts"
+echo_dedupe = true   # drop [Me] lines that are just the speakers echoing into the mic
+
+[speakers]
+enabled = true            # tell voices apart; click a name in the live window to rename
+sources = ["them", "me"]  # "them" = call participants, "me" = people in the room on your mic
+threshold = 0.75     # higher = stricter (one person may split in two -> fix by giving both the same name),
+                     # lower = different people may be merged (can't be undone)
+min_seconds = 1.5    # shorter sentences never create a new speaker
+
+[summary]
+enabled = false          # always off at startup; switch Claude on in the window for the session (summaries + answers via the Claude Code CLI)
+model = "sonnet"         # model passed to `claude --model`
+auto_after_call = false  # summarize automatically when a call ends (calls-only mode)
+
+[answers]
+enabled = false          # Claude answers questions live (right side of the window); needs summary.enabled too
+model = "haiku"          # haiku = fastest; sonnet / opus = better but slower
+web_search = false       # let Claude search the web (slower)
+sources = "all"          # whose questions: "all", "them" (call side) or "me" (mic)
+context_lines = 15       # recent transcript lines sent along with a question
+min_words = 4            # shorter questions ("Ja?") are ignored
+
+[screenshots]
+monitor = "primary"       # which screen: "primary", "all", or a screen number 1, 2, … (Settings lists them)
+auto = false              # while recording, save a screenshot whenever enough of the screen changed
+change_percent = 10       # auto: share of the screen (in %) that must differ from the last screenshot
+check_seconds = 2         # auto: how often the screen is checked
+
+[ui]
+show_window_on_start = true   # live text window
+close_to_tray = true          # true: closing the window only hides it (Quit is in the tray menu); false: closing quits
+always_on_top = false
+live_preview = false          # grey preview text while someone is speaking (costs extra processing)
+font_size = 11
+theme = "system"              # "system" follows Windows light/dark; or "light" / "dark"

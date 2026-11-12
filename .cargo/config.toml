@@ -1,0 +1,16 @@
+# Link the C runtime statically so the .exe runs without the VC++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+# Use the (patched, see vendor/whisper-rs-sys) bundled bindings instead of running bindgen, which needs libclang.
+WHISPER_DONT_GENERATE_BINDINGS = "1"
+# whisper.cpp build flags (the build script passes CMAKE_*/GGML_* variables to CMake). Without these the
+# cmake crate compiles it without optimisation, about 50x slower. AVX2/FMA: any x86 CPU from 2015 on.
+CMAKE_C_FLAGS_RELEASE = "/MT /O2 /Ob2 /DNDEBUG"
+CMAKE_CXX_FLAGS_RELEASE = "/MT /O2 /Ob2 /DNDEBUG"
+GGML_NATIVE = "OFF"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"

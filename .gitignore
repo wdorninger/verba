@@ -1,0 +1,14 @@
+# Build outputs
+/target/
+/dist/
+
+# Local data from dev runs (transcripts, voiceprints, logs, screenshots) never belongs in git
+/dev-home/
+transcripts/
+logs/
+speakers.json
+speakers.tmp
+/config.toml
+
+# Local notes for the coding assistant
+/CLAUDE.md

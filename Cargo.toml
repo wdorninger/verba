@@ -1,0 +1,42 @@
+[package]
+name = "transcribe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = "0.4.45"
+cpal = "0.18.2"
+crossbeam-channel = "0.5.17"
+eframe = "0.37.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+libloading = "0.9.0"
+log = "0.4.35"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sherpa-onnx = { version = "2.0.1", default-features = false, features = ["shared"] }
+similar = "3.2.1"
+tiny-skia = "0.12.0"
+toml = "1.2.1"
+tray-icon = "0.26.1"
+ureq = "3.5.2"
+whisper-rs = "0.16.0"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Console"] }
+winreg = "0.56.0"
+xcap = "0.9.10"
+
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# tract and rustfft are far too slow unoptimized; keep them fast in debug builds too.
+[profile.dev.package."*"]
+opt-level = 3
+
+[patch.crates-io]
+# Bundled bindings fixed for Windows, so no bindgen/libclang is needed (see vendor/whisper-rs-sys/PATCHED.md).
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
