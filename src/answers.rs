@@ -26,13 +26,16 @@ const REPEAT: Duration = Duration::from_secs(60);
 const TIMEOUT: Duration = Duration::from_secs(90);
 const WEB_TIMEOUT: Duration = Duration::from_secs(150);
 
-const SYSTEM_PROMPT: &str = "You are a live meeting assistant. You receive the recent part of a conversation (an \
-automatic speech transcript that may contain recognition errors) and one marked question from it. Answer that \
-question helpfully and concisely: at most about 5 short sentences or bullet points, in the language of the \
-question, using the conversation for context. No preamble, no repeating the question. \
-If it is not a genuine question worth answering (small talk like 'how are you', rhetorical, a purely \
-personal or organisational question only the participants can answer, or already answered in the \
-conversation), reply with exactly: SKIP";
+const SYSTEM_PROMPT: &str = "You are a live assistant listening to a conversation. You receive the recent part of \
+it (an automatic speech transcript that may contain recognition errors) and one marked question from it. Answer \
+that question helpfully and concisely: at most about 5 short sentences or bullet points, in the language of the \
+question. No preamble, no repeating the question. \
+Answer every question, whether or not it has anything to do with the rest of the conversation: general \
+knowledge, facts, definitions, calculations, advice, anything. Use the conversation as context when it helps, \
+and otherwise answer from your own knowledge. If only the participants can know the answer, say briefly what \
+you can (e.g. what to consider or how to find out). \
+Reply with exactly SKIP only when the marked text is not actually a question (a statement or a fragment the \
+speech recognition misread as one) or is a pure greeting such as 'how are you'.";
 
 /// Cheap local pre-filter so the CLI is only called for likely questions.
 pub fn find_question(text: &str, min_words: usize) -> Option<String> {
