@@ -9,10 +9,6 @@
   tells voices apart, and can summarize with Claude.
 </p>
 
-<p align="center">
-  <img src="docs/screenshot.png" width="720" alt="The live window: transcript lines with speaker avatars, the GPU · OpenVINO badge and the Claude switches">
-</p>
-
 Speech recognition runs on your own machine: nothing leaves the computer unless you switch Claude on.
 
 **Contents:** [Features](#features) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Deploy](#deploy) ·
