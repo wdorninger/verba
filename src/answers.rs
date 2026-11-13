@@ -124,6 +124,11 @@ impl Answerer {
         }
     }
 
+    /// New transcript: questions from now on are sent without the previous transcript's lines.
+    pub fn reset_context(&self) {
+        self.state.lock().unwrap().context.clear();
+    }
+
     /// Manual "Ask Claude about this" from the window; skips the question filter.
     pub fn ask(&self, core: &Core, time: &str, label: &str, text: &str) {
         self.enqueue(core, time, label, text.trim(), true);

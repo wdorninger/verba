@@ -1,5 +1,5 @@
-//! Whisper on the Intel GPU through OpenVINO GenAI's C API (openvino_genai_c.dll), the same engine and models
-//! the Python version used (~3x faster than the CPU). The DLLs are loaded at runtime from the `openvino` folder
+//! Whisper on the Intel GPU through OpenVINO GenAI's C API (openvino_genai_c.dll), OpenVINO Whisper models
+//! (~3x faster than the CPU). The DLLs are loaded at runtime from the `openvino` folder
 //! next to the executable, so the app still runs (on the CPU backend) without them.
 
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -101,7 +101,7 @@ impl Api {
     }
 }
 
-/// The model folder: the Python version's Hugging Face download if present, else our own download.
+/// The model folder: an existing Hugging Face cache download if present, else our own download.
 fn model_dir(model: &str) -> Result<PathBuf> {
     let repo = if model.contains('/') { model.to_string() } else { format!("OpenVINO/whisper-{model}-fp16-ov") };
     let hf = PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default())
@@ -131,7 +131,9 @@ fn model_dir(model: &str) -> Result<PathBuf> {
         .filter_map(|s| s["rfilename"].as_str().map(str::to_string))
         .filter(|f| !f.starts_with('.') && !f.ends_with(".md"))
         .collect();
-    for f in files {
+    let count = files.len();
+    for (i, f) in files.into_iter().enumerate() {
+        crate::models::set_progress(format!("Checking speech model files ({} of {count})…", i + 1), None);
         crate::models::ensure(&format!("{local}/{f}"), &format!("https://huggingface.co/{repo}/resolve/main/{f}"))?;
     }
     Ok(dir)
@@ -149,9 +151,13 @@ impl OpenVinoWhisper {
     pub fn load(model: &str, device: &str) -> Result<OpenVinoWhisper> {
         let api = Api::load()?;
         let dir = model_dir(model)?;
-        // Compiled GPU kernels: first start ~30 s, later ~2 s (shared with the Python version).
+        // Compiled GPU kernels: first start ~30 s, later ~2 s.
         let cache = crate::config::model_dir().join("ov-cache");
         std::fs::create_dir_all(&cache)?;
+        crate::models::set_progress(
+            format!("Preparing speech recognition on the {device} (the first start can take a minute)…"),
+            None,
+        );
         let (path, dev) = (CString::new(dir.to_string_lossy().as_bytes())?, CString::new(device)?);
         let (key, value) = (CString::new("CACHE_DIR")?, CString::new(cache.to_string_lossy().as_bytes())?);
         let mut pipeline: Ptr = std::ptr::null_mut();

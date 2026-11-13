@@ -1,5 +1,5 @@
 //! Screenshots (xcap): on demand from the window or tray, and automatically while recording whenever enough
-//! of the screen has changed. Saved next to the current transcript and referenced in it.
+//! of the screen has changed. Saved in the current transcript's folder and referenced in the transcript.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -63,12 +63,11 @@ fn changed_percent(a: &GrayImage, b: &GrayImage) -> f32 {
     changed as f32 * 100.0 / (a.width() * a.height()).max(1) as f32
 }
 
-/// Saves the image next to the transcript and notes it in the transcript and the window.
+/// Saves the image in the current transcript's folder and notes it in the transcript and the window.
 fn save(core: &Core, img: &RgbaImage, tag: &str, reason: &str) -> Result<PathBuf> {
-    let transcript = core.writer.path();
+    let folder = core.writer.folder().context("creating the transcript folder")?;
     let now = Local::now();
-    let stem = transcript.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    let path = core.writer.directory().join(format!("{stem}_shot_{}{tag}.png", now.format("%H-%M-%S")));
+    let path = folder.join(format!("screenshot_{}{tag}.png", now.format("%H-%M-%S")));
     img.save(&path).with_context(|| format!("saving {}", path.display()))?;
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let time = now.format("%H:%M:%S").to_string();

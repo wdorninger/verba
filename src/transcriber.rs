@@ -61,7 +61,16 @@ impl TranscriptWriter {
         self.inner.lock().unwrap().0.clone()
     }
 
-    /// Starts a fresh transcript file, e.g. one per call.
+    /// The current transcript's own folder (screenshots and the summary go there too), created on demand.
+    pub fn folder(&self) -> std::io::Result<PathBuf> {
+        let path = self.path();
+        let folder = path.parent().map(PathBuf::from).unwrap_or_else(|| self.directory.clone());
+        std::fs::create_dir_all(&folder)?;
+        Ok(folder)
+    }
+
+    /// Starts a fresh transcript, e.g. one per call or from the "New transcript" button. Each transcript gets
+    /// its own folder: `<directory>\<date_time>[_App]\<date_time>[_App].txt`.
     pub fn new_file(&self, suffix: &str) {
         let now = Local::now();
         let mut name = now.format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -71,8 +80,8 @@ impl TranscriptWriter {
             name.push('_');
             name.push_str(&clean.trim().replace(' ', "-"));
         }
-        let path = self.directory.join(format!("{name}.txt"));
-        // The file is only created with the first line, so starts without speech leave no empty files.
+        let path = self.directory.join(&name).join(format!("{name}.txt"));
+        // Folder and file are only created with the first line, so starts without speech leave nothing behind.
         let header = format!(
             "# Transcript started {}{}\n",
             now.format("%Y-%m-%d %H:%M:%S"),
@@ -85,10 +94,11 @@ impl TranscriptWriter {
     pub fn append(&self, line: &str) {
         let inner = self.inner.lock().unwrap();
         let new = !inner.0.exists();
-        let result = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&inner.0)
+        let result = inner
+            .0
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|_| std::fs::OpenOptions::new().create(true).append(true).open(&inner.0))
             .and_then(|mut f| f.write_all(format!("{}{line}\n", if new { inner.1.as_str() } else { "" }).as_bytes()));
         if let Err(e) = result {
             log::error!("Could not write {}: {e}", inner.0.display());
@@ -121,6 +131,7 @@ pub fn run(core: Arc<Core>, input: Receiver<Chunk>) {
     let (model_name, threads, beam) = core.whisper_settings();
     let backend = core.cfg.lock().unwrap().str("whisper", "backend");
     log::info!("Loading Whisper model '{model_name}' (first run downloads it)...");
+    crate::models::set_progress(format!("Loading speech model '{model_name}'…"), None);
     let model = match Engine::load(&model_name, &backend, threads, beam) {
         Ok((m, info)) => {
             let fallback = info.fallback.clone();
@@ -140,10 +151,12 @@ pub fn run(core: Arc<Core>, input: Receiver<Chunk>) {
     };
     log::info!("Model loaded");
     if let Some(speakers) = &core.speakers {
+        crate::models::set_progress("Loading voice recognition…", None);
         if let Err(e) = speakers.load_model() {
             log::error!("Speaker recognition unavailable: {e:#}");
         }
     }
+    crate::models::clear_progress();
     core.on_ready();
 
     let mut t = Transcriber {
@@ -345,7 +358,26 @@ impl Transcriber {
 
 #[cfg(test)]
 mod tests {
-    use super::is_annotation;
+    use super::{TranscriptWriter, is_annotation};
+
+    #[test]
+    fn each_transcript_gets_its_own_folder() {
+        let dir = std::env::temp_dir().join(format!("transcribe-writer-test-{}", std::process::id()));
+        let w = TranscriptWriter::new(dir.clone());
+        let first = w.path();
+        let folder = first.parent().unwrap().to_path_buf();
+        assert_eq!(folder.parent().unwrap(), dir);
+        assert_eq!(folder.file_name().unwrap(), first.file_stem().unwrap());
+        assert!(!folder.exists(), "nothing is created before the first line");
+        w.append("[10:00:00] [Hanna] Hello");
+        assert!(first.exists());
+        assert_eq!(w.folder().unwrap(), folder);
+        std::thread::sleep(std::time::Duration::from_millis(1100)); // names are per second
+        w.new_file("Teams");
+        assert_ne!(w.path().parent(), first.parent());
+        assert!(w.path().to_string_lossy().ends_with("_Teams.txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn drops_non_speech_annotations() {

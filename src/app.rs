@@ -191,7 +191,13 @@ impl Core {
         }
         let mut parts: Vec<String> = Vec::new();
         match self.state() {
-            State::Loading => return "Loading model…".into(),
+            State::Loading => {
+                return match crate::models::progress() {
+                    Some((text, Some(f))) => format!("{text} ({:.0}%)", f * 100.0),
+                    Some((text, None)) => text,
+                    None => "Loading model…".into(),
+                };
+            }
             State::Paused => parts.push("Paused".into()),
             State::Waiting => parts.push("Waiting for a call…".into()),
             _ => {
@@ -399,6 +405,15 @@ impl Core {
         }
         self.answerer.rename(&result.0, &result.2);
         Some(result)
+    }
+
+    /// "New transcript": later lines go to a new file in a new folder; Claude no longer sees the old lines.
+    pub fn new_transcript(&self) {
+        let suffix = self.call_app.lock().unwrap().clone().unwrap_or_default();
+        self.writer.new_file(&suffix);
+        self.answerer.reset_context();
+        log::info!("New transcript started");
+        self.ui.send(UiEvent::Note(format!("New transcript started {}", Local::now().format("%H:%M"))));
     }
 
     pub fn ask(&self, time: &str, label: &str, text: &str) {

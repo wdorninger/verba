@@ -16,6 +16,7 @@ pub enum TrayAction {
     CallsOnly,
     Summarize,
     Screenshot,
+    NewTranscript,
     OpenTranscript,
     OpenFolder,
     RestartAudio,
@@ -33,6 +34,34 @@ pub fn quit(core: &Core) -> ! {
     ICON.with(|i| drop(i.borrow_mut().take()));
     core.shutdown();
     std::process::exit(0);
+}
+
+/// Shows a notification balloon from the tray icon (on Windows 10/11 it appears as a notification).
+/// Call from the main thread, where the icon lives.
+pub fn notify(title: &str, text: &str) {
+    use windows_sys::Win32::UI::Shell::{NIF_INFO, NIIF_INFO, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW};
+    fn copy_into(dst: &mut [u16], s: &str) {
+        let room = dst.len() - 1; // keep the terminating 0
+        for (d, c) in dst.iter_mut().zip(s.encode_utf16().take(room)) {
+            *d = c;
+        }
+    }
+    ICON.with(|i| {
+        let Some(icon) = i.borrow().as_ref().map(|t| t.window_handle()) else { return };
+        // SAFETY: plain struct for the Shell API, zero-initialised as the API expects.
+        let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = icon as _;
+        // tray-icon numbers its icons from 1 (`uID`) per process; this app creates exactly one.
+        nid.uID = 1;
+        nid.uFlags = NIF_INFO;
+        nid.dwInfoFlags = NIIF_INFO;
+        copy_into(&mut nid.szInfoTitle, title);
+        copy_into(&mut nid.szInfo, text);
+        if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) } == 0 {
+            log::warn!("Could not show the tray notification");
+        }
+    });
 }
 
 pub struct Tray {
@@ -66,6 +95,7 @@ impl Tray {
         let calls_only = CheckMenuItem::new("Only during calls", true, false, None);
         let summarize = MenuItem::new("Summarize transcript (Claude)", false, None);
         let shot = MenuItem::new("Take screenshot", true, None);
+        let new_transcript = MenuItem::new("New transcript", true, None);
         let open = MenuItem::new("Open transcript", true, None);
         let folder = MenuItem::new("Open transcripts folder", true, None);
         let restart = MenuItem::new("Restart audio devices", true, None);
@@ -79,6 +109,7 @@ impl Tray {
             &calls_only,
             &summarize,
             &shot,
+            &new_transcript,
             &open,
             &folder,
             &restart,
@@ -91,6 +122,7 @@ impl Tray {
             (calls_only.id().clone(), TrayAction::CallsOnly),
             (summarize.id().clone(), TrayAction::Summarize),
             (shot.id().clone(), TrayAction::Screenshot),
+            (new_transcript.id().clone(), TrayAction::NewTranscript),
             (open.id().clone(), TrayAction::OpenTranscript),
             (folder.id().clone(), TrayAction::OpenFolder),
             (restart.id().clone(), TrayAction::RestartAudio),

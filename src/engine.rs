@@ -1,4 +1,4 @@
-//! Picks the speech recognition backend: OpenVINO on the Intel GPU (default, like the Python version) or
+//! Picks the speech recognition backend: OpenVINO on the Intel GPU (default) or
 //! whisper.cpp on the CPU, which is also the fallback when the GPU backend can't start.
 
 use anyhow::Result;

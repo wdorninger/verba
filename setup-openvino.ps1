@@ -1,5 +1,5 @@
 # One-time build-machine setup for the GPU backend: downloads the official OpenVINO GenAI runtime
-# (same version as the Python version used) into %LOCALAPPDATA%\transcribe-build and checks its SHA-256.
+# into %LOCALAPPDATA%\transcribe-build and checks its SHA-256.
 # package.ps1 copies the needed DLLs from there into dist\transcribe\openvino.
 $ErrorActionPreference = "Stop"
 $version = "2026.4.1"

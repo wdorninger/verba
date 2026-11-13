@@ -54,7 +54,7 @@ fn attach_console() {
     }
 }
 
-/// Only one instance at a time (same mutex name as the Python version, so they never run together).
+/// Only one instance at a time.
 fn already_running() -> bool {
     use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::CreateMutexW;

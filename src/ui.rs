@@ -293,6 +293,7 @@ impl LiveApp {
                 TrayAction::CallsOnly => self.core.set_calls_only(!self.core.calls_only.load(Ordering::Relaxed)),
                 TrayAction::Summarize => self.core.summarize(None, false),
                 TrayAction::Screenshot => crate::screenshots::capture_now(self.core.clone()),
+                TrayAction::NewTranscript => self.new_transcript(),
                 TrayAction::OpenTranscript => self.core.open_transcript(),
                 TrayAction::OpenFolder => self.core.open_folder(),
                 TrayAction::RestartAudio => self.core.capture.restart(),
@@ -307,6 +308,11 @@ impl LiveApp {
         self.heights.clear();
         self.partials.clear();
         self.current_match = None;
+    }
+
+    fn new_transcript(&mut self) {
+        self.clear();
+        self.core.new_transcript();
     }
 
     fn copy_all(&self, ctx: &egui::Context) {
@@ -380,7 +386,23 @@ impl LiveApp {
             let state = self.core.state();
             let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
             ui.painter().circle_filled(rect.center(), 5.0, theme::status_color(state, dark));
-            ui.label(RichText::new(self.core.status()).font(FontId::new(14.0, theme::bold())));
+            if state == State::Loading {
+                // Start-up progress: a bar while downloading, a spinner otherwise.
+                let progress = crate::models::progress();
+                match progress.as_ref().and_then(|(_, f)| *f) {
+                    Some(f) => {
+                        ui.add(egui::ProgressBar::new(f).desired_width(120.0).show_percentage());
+                    }
+                    None => {
+                        ui.add(egui::Spinner::new().size(14.0));
+                    }
+                }
+                let text = progress.map_or_else(|| "Loading model…".to_string(), |(t, _)| t);
+                ui.label(RichText::new(text).font(FontId::new(14.0, theme::bold())));
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            } else {
+                ui.label(RichText::new(self.core.status()).font(FontId::new(14.0, theme::bold())));
+            }
             self.engine_badge(ui, dark);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.menu_button("⋯", |ui| {
@@ -524,6 +546,9 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
                 }
                 if ui.button("Copy all").clicked() {
                     self.copy_all(ui.ctx());
+                }
+                if ui.button("➕ New transcript").on_hover_text("Start a new transcript file and folder; clears the window").clicked() {
+                    self.new_transcript();
                 }
             });
         });
@@ -970,9 +995,13 @@ impl eframe::App for LiveApp {
         let ctx = ui.ctx().clone();
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
             if self.core.cfg.lock().unwrap().bool("ui", "close_to_tray") {
-                // Closing just hides the window; Quit is in the tray menu.
+                // Closing just hides the window; Quit is in the tray menu. Say so, or it looks like it quit.
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+                crate::tray::notify(
+                    "Transcribe is still running",
+                    "It keeps running in the system tray. Double-click the tray icon to open the window, or right-click it and choose Quit.",
+                );
             } else {
                 self.quitting = true;
                 crate::tray::quit(&self.core);
