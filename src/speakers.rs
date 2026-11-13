@@ -16,6 +16,9 @@ const MODEL_URL: &str =
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx";
 const RECENT_SECONDS: f64 = 10.0; // short chunks are attributed to whoever spoke within this window
 const MAX_COUNT: u32 = 50; // caps the centroid weight so a voice can keep adapting
+/// How far below the threshold a named voice may still match (and win over unnamed ones). Different people
+/// can score around 0.7 on call audio, so this stays small.
+const NAMED_MARGIN: f32 = 0.08;
 
 fn normalize(mut v: Vec<f32>) -> Vec<f32> {
     let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -100,6 +103,64 @@ impl Inner {
         }
         id
     }
+
+    /// Merges voice `from` into voice `into` (indices); returns the new index of `into`.
+    fn merge(&mut self, from: usize, into: usize) -> usize {
+        let sp = self.speakers.remove(from);
+        let into = if into > from { into - 1 } else { into };
+        let other = &mut self.speakers[into];
+        other.centroid = weighted(&other.centroid, other.count, &sp.centroid, sp.count);
+        other.count = (other.count + sp.count).min(MAX_COUNT);
+        let oid = other.id.clone();
+        for entry in self.last.iter_mut() {
+            if entry.1 == sp.id {
+                entry.1 = oid.clone();
+            }
+        }
+        self.merged.insert(sp.id, oid);
+        into
+    }
+
+    /// The voice a voiceprint belongs to, or None. Named voices win: one that is within `margin` of the
+    /// threshold and nearly as close as the best match is taken, so a renamed person keeps the name even
+    /// when a sentence sounds a little different. An unnamed voice that turns out to sound like a named one
+    /// (their averaged voiceprints match) is merged into it.
+    fn choose(&mut self, emb: &[f32], threshold: f32, margin: f32) -> Option<usize> {
+        let (mut best, mut score) = (None, -1.0f32);
+        let (mut named, mut named_score) = (None, -1.0f32);
+        for (i, sp) in self.speakers.iter().enumerate() {
+            let s = dot(emb, &sp.centroid);
+            if s > score {
+                best = Some(i);
+                score = s;
+            }
+            if sp.named && s > named_score {
+                named = Some(i);
+                named_score = s;
+            }
+        }
+        if let Some(n) = named {
+            if named_score >= threshold - margin && named_score >= score - margin / 2.0 {
+                return Some(n);
+            }
+        }
+        let b = best.filter(|_| score >= threshold)?;
+        if !self.speakers[b].named {
+            let centroid = self.speakers[b].centroid.clone();
+            let closest = self
+                .speakers
+                .iter()
+                .enumerate()
+                .filter(|(_, sp)| sp.named)
+                .map(|(i, sp)| (i, dot(&centroid, &sp.centroid)))
+                .max_by(|a, b| a.1.total_cmp(&b.1));
+            if let Some((n, s)) = closest.filter(|(_, s)| *s >= threshold) {
+                log::info!("{} sounds like {} ({s:.2}): merged", self.speakers[b].name, self.speakers[n].name);
+                return Some(self.merge(b, n));
+            }
+        }
+        Some(b)
+    }
 }
 
 pub struct SpeakerRegistry {
@@ -173,24 +234,14 @@ impl SpeakerRegistry {
         // Short voiceprints are noisier and score lower, so they get a looser bar (but never create a voice).
         let threshold = if long_enough { base } else { base - 0.15 };
         let mut inner = self.inner.lock().unwrap();
-        let mut best: Option<usize> = None;
-        let mut score = -1.0f32;
-        if let Some(emb) = &emb {
-            for (i, sp) in inner.speakers.iter().enumerate() {
-                let s = dot(emb, &sp.centroid);
-                if s > score {
-                    best = Some(i);
-                    score = s;
-                }
-            }
-        }
+        let chosen = emb.as_ref().and_then(|e| inner.choose(e, threshold, NAMED_MARGIN));
         log::debug!(
-            "{:.1}s: best match {:?} ({score:.2})",
+            "{:.1}s: voice {:?}",
             audio.len() as f32 / RATE as f32,
-            best.map(|i| inner.speakers[i].name.clone())
+            chosen.map(|i| inner.speakers[i].name.clone())
         );
-        let index = match best {
-            Some(i) if score >= threshold => {
+        let index = match chosen {
+            Some(i) => {
                 if long_enough {
                     // only reliable voiceprints refine the centroid
                     let sp = &mut inner.speakers[i];
@@ -199,14 +250,16 @@ impl SpeakerRegistry {
                 }
                 i
             }
-            _ if long_enough => {
+            None if long_enough => {
+                let emb = emb.unwrap();
+                let score = inner.speakers.iter().map(|s| dot(&emb, &s.centroid)).fold(-1.0f32, f32::max);
                 let name = format!("Speaker {}", inner.next_number);
                 inner.next_number += 1;
                 log::info!("New voice: {name} (best previous match {score:.2})");
-                inner.speakers.push(Speaker { id: random_id(), name, centroid: emb.unwrap(), count: 1, named: false });
+                inner.speakers.push(Speaker { id: random_id(), name, centroid: emb, count: 1, named: false });
                 inner.speakers.len() - 1
             }
-            _ => return Ok(None), // the caller decides from the neighbouring sentences
+            None => return Ok(None), // the caller decides from the neighbouring sentences
         };
         let (id, name) = (inner.speakers[index].id.clone(), inner.speakers[index].name.clone());
         inner.last.retain(|(s, _, _)| *s != source);
@@ -228,20 +281,10 @@ impl SpeakerRegistry {
         let other =
             inner.speakers.iter().position(|o| o.id != speaker_id && o.name.to_lowercase() == new_name.to_lowercase());
         let (surviving_id, final_name) = if let Some(o) = other {
-            let sp = inner.speakers.remove(i);
-            let o = if o > i { o - 1 } else { o };
+            let o = inner.merge(i, o);
             let other = &mut inner.speakers[o];
-            other.centroid = weighted(&other.centroid, other.count, &sp.centroid, sp.count);
-            other.count = (other.count + sp.count).min(MAX_COUNT);
             other.named = true;
-            let (oid, oname) = (other.id.clone(), other.name.clone());
-            for entry in inner.last.iter_mut() {
-                if entry.1 == sp.id {
-                    entry.1 = oid.clone();
-                }
-            }
-            inner.merged.insert(sp.id.clone(), oid.clone());
-            (oid, oname)
+            (other.id.clone(), other.name.clone())
         } else {
             let sp = &mut inner.speakers[i];
             sp.name = new_name.to_string();
@@ -332,6 +375,46 @@ mod tests {
         assert_eq!(r.rename("a", "Hanna"), Some(("Speaker 1".into(), "a".into(), "Hanna".into())));
         assert_eq!(r.current("a"), Some(("a".into(), "Hanna".into())));
         let _ = std::fs::remove_file(&r.path);
+    }
+
+    fn inner(voices: &[(&str, &str, &[f32], bool)]) -> Inner {
+        Inner {
+            speakers: voices
+                .iter()
+                .map(|(id, name, c, named)| Speaker {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    centroid: normalize(c.to_vec()),
+                    count: 5,
+                    named: *named,
+                })
+                .collect(),
+            next_number: 3,
+            last: Vec::new(),
+            merged: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn named_voice_wins_just_below_the_threshold() {
+        let mut i = inner(&[("a", "Hanna", &[1.0, 0.0], true), ("b", "Speaker 2", &[0.0, 1.0], false)]);
+        // 0.70 to Hanna (below 0.75, within the margin), 0.71 to the unnamed voice: Hanna.
+        assert_eq!(i.choose(&normalize(vec![0.70, 0.714]), 0.75, NAMED_MARGIN), Some(0));
+        // Clearly someone else: 0.6 to Hanna, 0.8 to the unnamed voice.
+        assert_eq!(i.choose(&normalize(vec![0.6, 0.8]), 0.75, NAMED_MARGIN), Some(1));
+        // Nobody close: a new voice (None).
+        let mut j = inner(&[("a", "Hanna", &[1.0, 0.0, 0.0], true)]);
+        assert_eq!(j.choose(&[0.0, 0.0, 1.0], 0.75, NAMED_MARGIN), None);
+    }
+
+    #[test]
+    fn unnamed_voice_that_sounds_like_a_named_one_is_merged() {
+        // "c" was created for Hanna's voice before she was named (voiceprints 0.8 alike).
+        let mut i = inner(&[("a", "Hanna", &[1.0, 0.0, 0.0], true), ("c", "Speaker 3", &[0.8, 0.6, 0.0], false)]);
+        let chosen = i.choose(&normalize(vec![0.3, 0.95, 0.0]), 0.75, NAMED_MARGIN);
+        assert_eq!(chosen.map(|k| i.speakers[k].name.as_str()), Some("Hanna"));
+        assert_eq!(i.speakers.len(), 1);
+        assert_eq!(i.resolve("c"), "a");
     }
 
     #[test]
