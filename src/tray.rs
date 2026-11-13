@@ -46,21 +46,34 @@ pub fn notify(title: &str, text: &str) {
             *d = c;
         }
     }
+    thread_local! {
+        /// The icon's Shell id once found (see below).
+        static UID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+    }
     ICON.with(|i| {
         let Some(icon) = i.borrow().as_ref().map(|t| t.window_handle()) else { return };
         // SAFETY: plain struct for the Shell API, zero-initialised as the API expects.
         let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
         nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
         nid.hWnd = icon as _;
-        // tray-icon numbers its icons from 1 (`uID`) per process; this app creates exactly one.
-        nid.uID = 1;
         nid.uFlags = NIF_INFO;
         nid.dwInfoFlags = NIIF_INFO;
         copy_into(&mut nid.szInfoTitle, title);
         copy_into(&mut nid.szInfo, text);
-        if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) } == 0 {
-            log::warn!("Could not show the tray notification");
+        // tray-icon doesn't expose the icon's Shell id (`uID`; a counter it also uses for other ids, so 2 here
+        // today). The window belongs to our icon alone, so try the first few ids: a wrong one just fails.
+        let candidates: Vec<u32> = match UID.with(|u| u.get()) {
+            Some(id) => vec![id],
+            None => (1..=8).collect(),
+        };
+        for id in candidates {
+            nid.uID = id;
+            if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) } != 0 {
+                UID.with(|u| u.set(Some(id)));
+                return;
+            }
         }
+        log::warn!("Could not show the tray notification");
     });
 }
 
