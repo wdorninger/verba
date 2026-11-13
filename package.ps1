@@ -23,9 +23,9 @@ foreach ($f in "verba.exe", "sherpa-onnx-c-api.dll", "onnxruntime.dll") {
 }
 Copy-Item "target\release\openvino" $out -Recurse
 Copy-Item "README.md" $out -ErrorAction SilentlyContinue
-# README images, so the copied README shows them too
+# Documentation pages and images, so the links in the copied README work
 New-Item -ItemType Directory -Force (Join-Path $out "docs") | Out-Null
-Copy-Item "docs\*.png", "docs\icon.svg" (Join-Path $out "docs")
+Copy-Item "docs\*.md", "docs\*.png", "docs\icon.svg" (Join-Path $out "docs")
 
 Write-Host "Packaged to $out"
 Get-ChildItem $out -Recurse -File | ForEach-Object { "{0,12:N0}  {1}" -f $_.Length, $_.FullName.Substring($out.Length + 1) }
