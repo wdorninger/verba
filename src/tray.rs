@@ -36,45 +36,92 @@ pub fn quit(core: &Core) -> ! {
     std::process::exit(0);
 }
 
-/// Shows a notification balloon from the tray icon (on Windows 10/11 it appears as a notification).
-/// Call from the main thread, where the icon lives.
+thread_local! {
+    /// The bubble currently shown (a tooltip window) and the timer that hides it, as raw values.
+    static BUBBLE: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Shows the app's own balloon bubble pointing at the tray icon for a few seconds. It is a plain Windows
+/// balloon tooltip, so it appears whatever the Windows notification settings (Do Not Disturb etc.) are.
+/// Call from the main thread, where the tray icon and the message loop live.
 pub fn notify(title: &str, text: &str) {
-    use windows_sys::Win32::UI::Shell::{NIF_INFO, NIIF_INFO, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW};
-    fn copy_into(dst: &mut [u16], s: &str) {
-        let room = dst.len() - 1; // keep the terminating 0
-        for (d, c) in dst.iter_mut().zip(s.encode_utf16().take(room)) {
-            *d = c;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::Controls::{
+        ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, TOOLTIPS_CLASSW, TTF_ABSOLUTE, TTF_TRACK,
+        TTI_INFO, TTM_ADDTOOLW, TTM_SETMAXTIPWIDTH, TTM_SETTITLEW, TTM_TRACKACTIVATE, TTM_TRACKPOSITION, TTS_ALWAYSTIP,
+        TTS_BALLOON, TTS_CLOSE, TTS_NOPREFIX, TTTOOLINFOW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CW_USEDEFAULT, CreateWindowExW, SPI_GETWORKAREA, SendMessageW, SetTimer, SystemParametersInfoW, WS_EX_TOPMOST,
+        WS_POPUP,
+    };
+    let Some((owner, rect)) = ICON.with(|i| i.borrow().as_ref().map(|t| (t.window_handle(), t.rect()))) else { return };
+    // Point at the middle of the tray icon's top edge; if it is hidden in the overflow, at the screen corner.
+    let (x, y) = match rect {
+        Some(r) if r.size.width > 0 => ((r.position.x + r.size.width as f64 / 2.0) as i32, r.position.y as i32 + 4),
+        _ => {
+            let mut work = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut work as *mut RECT as _, 0) };
+            (work.right - 40, work.bottom - 2)
         }
-    }
-    thread_local! {
-        /// The icon's Shell id once found (see below).
-        static UID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
-    }
-    ICON.with(|i| {
-        let Some(icon) = i.borrow().as_ref().map(|t| t.window_handle()) else { return };
-        // SAFETY: plain struct for the Shell API, zero-initialised as the API expects.
-        let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = icon as _;
-        nid.uFlags = NIF_INFO;
-        nid.dwInfoFlags = NIIF_INFO;
-        copy_into(&mut nid.szInfoTitle, title);
-        copy_into(&mut nid.szInfo, text);
-        // tray-icon doesn't expose the icon's Shell id (`uID`; a counter it also uses for other ids, so 2 here
-        // today). The window belongs to our icon alone, so try the first few ids: a wrong one just fails.
-        let candidates: Vec<u32> = match UID.with(|u| u.get()) {
-            Some(id) => vec![id],
-            None => (1..=8).collect(),
+    };
+    hide_bubble();
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (mut text_w, title_w) = (wide(text), wide(title));
+    unsafe {
+        let icc = INITCOMMONCONTROLSEX { dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_WIN95_CLASSES };
+        InitCommonControlsEx(&icc);
+        let style = WS_POPUP | TTS_BALLOON | TTS_NOPREFIX | TTS_ALWAYSTIP | TTS_CLOSE;
+        let tip = CreateWindowExW(
+            WS_EX_TOPMOST, TOOLTIPS_CLASSW, std::ptr::null(), style,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            owner as _, null_mut(), null_mut(), std::ptr::null(),
+        );
+        if tip.is_null() {
+            log::warn!("Could not show the tray bubble");
+            return;
+        }
+        // The control copies the text and title. Without a manifest the exe gets common controls v5, which
+        // rejects the full v6 struct size: use the older size without the trailing `lpReserved`.
+        let tool = TTTOOLINFOW {
+            cbSize: (std::mem::size_of::<TTTOOLINFOW>() - std::mem::size_of::<*mut core::ffi::c_void>()) as u32,
+            uFlags: TTF_TRACK | TTF_ABSOLUTE,
+            hwnd: owner as _,
+            uId: 1,
+            lpszText: text_w.as_mut_ptr(),
+            ..Default::default()
         };
-        for id in candidates {
-            nid.uID = id;
-            if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) } != 0 {
-                UID.with(|u| u.set(Some(id)));
-                return;
-            }
+        let tool_ptr = &tool as *const TTTOOLINFOW as isize;
+        if SendMessageW(tip, TTM_ADDTOOLW, 0, tool_ptr) == 0 {
+            log::warn!("Could not show the tray bubble (tooltip refused)");
+            windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(tip);
+            return;
         }
-        log::warn!("Could not show the tray notification");
-    });
+        SendMessageW(tip, TTM_SETMAXTIPWIDTH, 0, 320);
+        SendMessageW(tip, TTM_SETTITLEW, TTI_INFO as usize, title_w.as_ptr() as isize);
+        SendMessageW(tip, TTM_TRACKPOSITION, 0, (((y as u32 & 0xFFFF) << 16) | (x as u32 & 0xFFFF)) as isize);
+        SendMessageW(tip, TTM_TRACKACTIVATE, 1, tool_ptr);
+        let timer = SetTimer(null_mut(), 0, 6000, Some(bubble_timer));
+        BUBBLE.with(|b| b.set((tip as usize, timer)));
+    }
+}
+
+unsafe extern "system" fn bubble_timer(_: windows_sys::Win32::Foundation::HWND, _: u32, _: usize, _: u32) {
+    hide_bubble();
+}
+
+fn hide_bubble() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyWindow, KillTimer};
+    let (tip, timer) = BUBBLE.with(|b| b.replace((0, 0)));
+    unsafe {
+        if timer != 0 {
+            KillTimer(std::ptr::null_mut(), timer);
+        }
+        if tip != 0 {
+            DestroyWindow(tip as _);
+        }
+    }
 }
 
 pub struct Tray {

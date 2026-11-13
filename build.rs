@@ -1,5 +1,5 @@
 //! Copies the OpenVINO GenAI runtime (GPU speech recognition) and the VC++ runtime it needs into
-//! target\<profile>\openvino, so every built transcribe.exe can use the GPU, not only the packaged one.
+//! target\<profile>\openvino, so every built verba.exe can use the GPU, not only the packaged one.
 //! The runtime comes from setup-openvino.ps1 (%LOCALAPPDATA%\transcribe-build); without it the build still
 //! works and the app runs on the CPU backend.
 

@@ -6,7 +6,7 @@
       <!-- config.toml, speakers.json, transcripts and logs of dev runs go here instead of target\release -->
       <env name="TRANSCRIBE_HOME" value="$PROJECT_DIR$/dev-home" />
       <!-- GPU backend: the OpenVINO DLLs packaged by package.ps1 -->
-      <env name="TRANSCRIBE_OPENVINO_DIR" value="$PROJECT_DIR$/dist/transcribe/openvino" />
+      <env name="TRANSCRIBE_OPENVINO_DIR" value="$PROJECT_DIR$/dist/verba/openvino" />
     </envs>
     <option name="emulateTerminal" value="true" />
     <option name="channel" value="DEFAULT" />

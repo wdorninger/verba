@@ -59,7 +59,7 @@ Speech recognition runs on your own machine: nothing leaves the computer unless 
 - Windows 11 look, light or dark following Windows, search, zoom, always on top.
 - Follows default audio device changes and recovers dead microphone streams after sleep.
 - Settings in the window (⚙) and in a commented `config.toml`.
-- Deploys as one folder: `transcribe.exe` plus its libraries; models download on first start.
+- Deploys as one folder: `verba.exe` plus its libraries; models download on first start.
 
 ## Screenshots
 
@@ -92,7 +92,7 @@ or person is shown.
 ## Quick start
 
 1. Build the package (see [Build](#build)) or take an existing `dist\transcribe\` folder.
-2. Copy the folder anywhere and start `transcribe.exe`. The first start downloads the models.
+2. Copy the folder anywhere and start `verba.exe`. The first start downloads the models.
 3. Double-click the tray icon for the live window. Transcripts are written to `transcripts\` next to the exe, one folder
    per transcript. The first start shows the model download and loading progress next to the status.
 
@@ -100,21 +100,21 @@ Please make sure everyone you record agrees to it.
 
 ## Deploy
 
-`dist\transcribe\` holds everything needed (built by `package.ps1`). Copy the folder anywhere and start `transcribe.exe`:
+`dist\verba\` holds everything needed (built by `package.ps1`). Copy the folder anywhere and start `verba.exe`:
 
 | File | What |
 | --- | --- |
-| `transcribe.exe` | the app; whisper.cpp and the C runtime are linked in |
+| `verba.exe` | the app; whisper.cpp and the C runtime are linked in |
 | `sherpa-onnx-c-api.dll`, `onnxruntime.dll` | voice recognition (sherpa-onnx) |
 | `openvino\` | GPU speech recognition (OpenVINO GenAI) and the VC++ runtime it needs; without it the app uses the CPU |
 
 `config.toml`, `speakers.json`, `transcripts\` and `logs\` are created next to the exe. Models are downloaded on first start to `%LOCALAPPDATA%\transcribe-models`; an OpenVINO Whisper model already in the Hugging Face cache (`%USERPROFILE%\.cache\huggingface`) is used instead of downloading it again. Compiled GPU kernels are cached in `%LOCALAPPDATA%\transcribe-models\ov-cache`, so later starts are fast.
 
-- `transcribe.exe --console` shows the log live (like `start-console.bat`).
-- `transcribe.exe --transcribe file.wav` transcribes a 16 kHz mono WAV, to check an installation without a call.
-- `transcribe.exe --feed a.wav b.wav …` pushes 16 kHz mono WAVs through the whole pipeline as speaker audio, back to
+- `verba.exe --console` shows the log live (like `start-console.bat`).
+- `verba.exe --transcribe file.wav` transcribes a 16 kHz mono WAV, to check an installation without a call.
+- `verba.exe --feed a.wav b.wav …` pushes 16 kHz mono WAVs through the whole pipeline as speaker audio, back to
   back in time, to try the window, voices and Claude without a call.
-- Autostart: Win+R, `shell:startup`, put a shortcut to `transcribe.exe` there.
+- Autostart: Win+R, `shell:startup`, put a shortcut to `verba.exe` there.
 - Only one instance runs at a time.
 
 ## Use

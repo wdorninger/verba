@@ -1,5 +1,5 @@
 # Creates a short synthetic meeting (Windows text-to-speech, three voices) as 16 kHz mono WAVs for README
-# screenshots and end-to-end tests:  transcribe.exe --feed <dir>\00.wav <dir>\01.wav ...
+# screenshots and end-to-end tests:  verba.exe --feed <dir>\00.wav <dir>\01.wav ...
 # No real voices or call content are involved.
 param([string]$OutDir = (Join-Path $env:TEMP "transcribe-demo"))
 $ErrorActionPreference = "Stop"
