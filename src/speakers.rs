@@ -298,6 +298,47 @@ impl SpeakerRegistry {
         Some((old_name, surviving_id, final_name))
     }
 
+    /// Known voices as (id, name, named), named ones first.
+    pub fn list(&self) -> Vec<(String, String, bool)> {
+        let inner = self.inner.lock().unwrap();
+        let mut v: Vec<_> = inner.speakers.iter().map(|s| (s.id.clone(), s.name.clone(), s.named)).collect();
+        v.sort_by_key(|s| !s.2);
+        v
+    }
+
+    /// Forgets one voice (its voiceprint and name); returns its name. Later sentences of that person start
+    /// again as a new speaker.
+    pub fn forget(&self, speaker_id: &str) -> Option<String> {
+        let mut inner = self.inner.lock().unwrap();
+        let id = inner.resolve(speaker_id).to_string();
+        let i = inner.speakers.iter().position(|s| s.id == id)?;
+        let sp = inner.speakers.remove(i);
+        inner.merged.retain(|from, into| *from != id && *into != id);
+        inner.last.retain(|(_, l, _)| *l != id);
+        if let Err(e) = self.save_locked(&inner) {
+            log::error!("Could not save {}: {e:#}", self.path.display());
+        }
+        log::info!("Forgot voice {}", sp.name);
+        Some(sp.name)
+    }
+
+    /// Forgets every voice and name and deletes speakers.json; returns how many named voices were dropped.
+    /// Numbering continues, so new voices never reuse a "Speaker N" label already in the transcript.
+    pub fn clear(&self) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        let named = inner.speakers.iter().filter(|s| s.named).count();
+        inner.speakers.clear();
+        inner.merged.clear();
+        inner.last.clear();
+        if self.path.exists() {
+            if let Err(e) = std::fs::remove_file(&self.path) {
+                log::error!("Could not delete {}: {e}", self.path.display());
+            }
+        }
+        log::info!("Forgot all voices ({named} named)");
+        named
+    }
+
     // --- persistence (only named speakers survive a restart) ---
     fn load(&self) {
         if !self.path.exists() {
@@ -415,6 +456,29 @@ mod tests {
         assert_eq!(chosen.map(|k| i.speakers[k].name.as_str()), Some("Hanna"));
         assert_eq!(i.speakers.len(), 1);
         assert_eq!(i.resolve("c"), "a");
+    }
+
+    #[test]
+    fn clear_forgets_voices_and_the_file() {
+        let r = registry();
+        r.rename("a", "Hanna");
+        assert!(r.path.exists());
+        assert_eq!(r.clear(), 1);
+        assert!(!r.path.exists());
+        assert_eq!(r.current("a"), None);
+        assert!(r.inner.lock().unwrap().speakers.is_empty());
+    }
+
+    #[test]
+    fn forget_drops_one_voice() {
+        let r = registry();
+        r.rename("a", "Hanna");
+        assert_eq!(r.list().iter().map(|s| s.1.as_str()).collect::<Vec<_>>(), ["Hanna", "Speaker 2"]);
+        assert_eq!(r.forget("a"), Some("Hanna".into()));
+        assert_eq!(r.current("a"), None);
+        assert_eq!(r.current("b"), Some(("b".into(), "Speaker 2".into())));
+        assert!(!std::fs::read_to_string(&r.path).unwrap().contains("Hanna"));
+        let _ = std::fs::remove_file(&r.path);
     }
 
     #[test]

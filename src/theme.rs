@@ -82,6 +82,21 @@ pub fn italic() -> FontFamily {
     FontFamily::Name("italic".into())
 }
 
+/// Whether the Windows icon font loaded (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on Windows 10).
+static HAS_ICONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub const ICON_SETTINGS: char = '\u{E713}';
+pub const ICON_CAMERA: char = '\u{E722}';
+
+/// An icon from the Windows icon font (the glyphs Settings and Explorer use), or `fallback` if it is missing.
+pub fn icon(glyph: char, fallback: &str) -> egui::RichText {
+    if HAS_ICONS.load(std::sync::atomic::Ordering::Relaxed) {
+        egui::RichText::new(glyph.to_string()).family(FontFamily::Name("icons".into())).size(14.0)
+    } else {
+        egui::RichText::new(fallback)
+    }
+}
+
 /// Segoe UI from the Windows fonts folder, with egui's built-in fonts as fallback for symbols and emoji.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -99,6 +114,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     let bold_ok = load("segoe-bold", "segoeuib.ttf");
     let italic_ok = load("segoe-italic", "segoeuii.ttf");
     let symbols = load("segoe-symbol", "seguisym.ttf");
+    let icons = load("icons", "SegoeIcons.ttf") || load("icons", "segmdl2.ttf");
+    HAS_ICONS.store(icons, std::sync::atomic::Ordering::Relaxed);
+    if icons {
+        fonts.families.insert(FontFamily::Name("icons".into()), vec!["icons".into()]);
+    }
     let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let family = |primary: Option<&str>| {
         let mut v: Vec<String> = primary.map(|p| vec![p.to_string()]).unwrap_or_default();
@@ -145,6 +165,15 @@ pub fn install_style(ctx: &egui::Context) {
             style.spacing.button_padding = egui::vec2(10.0, 4.0);
             style.spacing.interact_size.y = 26.0;
             style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+            // Like native controls: label and button text in the Windows text colour (egui's default is a
+            // mid grey, which makes text look thinner) at 12 px (Segoe UI 9 pt; egui's default is 13 px).
+            let w = &mut style.visuals.widgets;
+            for s in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+                s.fg_stroke.color = p.text;
+            }
+            for t in [egui::TextStyle::Body, egui::TextStyle::Button] {
+                style.text_styles.insert(t, egui::FontId::new(12.0, FontFamily::Proportional));
+            }
         });
     }
 }

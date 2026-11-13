@@ -105,14 +105,56 @@ impl TranscriptWriter {
         }
     }
 
-    /// Updates lines already written in this session after a speaker was named.
+    /// Updates lines already written in this session after a speaker was named (transcript and answers file).
     pub fn rename(&self, old_label: &str, new_label: &str) -> std::io::Result<()> {
         let inner = self.inner.lock().unwrap();
-        if !inner.0.exists() {
-            return Ok(());
+        for path in [inner.0.clone(), answers_path(&inner.0)] {
+            if path.exists() {
+                let text = std::fs::read_to_string(&path)?;
+                std::fs::write(&path, text.replace(&format!("] [{old_label}] "), &format!("] [{new_label}] ")))?;
+            }
         }
-        let text = std::fs::read_to_string(&inner.0)?;
-        std::fs::write(&inner.0, text.replace(&format!("] [{old_label}] "), &format!("] [{new_label}] ")))
+        Ok(())
+    }
+
+    /// Records a Claude question and answer in `<transcript>_answers.md`, next to the transcript.
+    pub fn append_answer(&self, time: &str, label: &str, question: &str, model: &str, seconds: f32, answer: &str) {
+        let inner = self.inner.lock().unwrap();
+        let path = answers_path(&inner.0);
+        let new = !path.exists();
+        let stem = inner.0.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let header = if new { format!("# Claude questions and answers ({stem})\n\n") } else { String::new() };
+        let entry = format!("{header}## [{time}] [{label}] {question}\n\n*{model}, {seconds:.1} s*\n\n{}\n\n", answer.trim());
+        let result = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|_| std::fs::OpenOptions::new().create(true).append(true).open(&path))
+            .and_then(|mut f| f.write_all(entry.as_bytes()));
+        if let Err(e) = result {
+            log::error!("Could not write {}: {e}", path.display());
+        }
+    }
+}
+
+fn answers_path(transcript: &std::path::Path) -> PathBuf {
+    let stem = transcript.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    transcript.with_file_name(format!("{stem}_answers.md"))
+}
+
+#[cfg(test)]
+mod writer_tests {
+    #[test]
+    fn answers_go_to_their_own_file_and_follow_renames() {
+        let dir = std::env::temp_dir().join(format!("verba-answers-{}", std::process::id()));
+        let w = super::TranscriptWriter::new(dir.clone());
+        w.append("[10:00:00] [Speaker 1] What is the deadline?");
+        w.append_answer("10:00:00", "Speaker 1", "What is the deadline?", "haiku", 2.5, "Friday.\n");
+        w.rename("Speaker 1", "Hanna").unwrap();
+        let answers = std::fs::read_to_string(super::answers_path(&w.path())).unwrap();
+        assert!(answers.starts_with("# Claude questions and answers"));
+        assert!(answers.contains("## [10:00:00] [Hanna] What is the deadline?\n\n*haiku, 2.5 s*\n\nFriday.\n"));
+        assert!(std::fs::read_to_string(w.path()).unwrap().contains("[Hanna] What"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 

@@ -195,7 +195,7 @@ fn main() {
     let icon = egui::IconData { rgba: theme::mic_icon(64, [0x2f, 0x6f, 0xd6]), width: 64, height: 64 };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Transcribe - live")
+            .with_title("Verba - Transcribe")
             .with_inner_size([780.0, 560.0])
             .with_min_inner_size([560.0, 360.0])
             .with_icon(Arc::new(icon))

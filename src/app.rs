@@ -432,6 +432,23 @@ impl Core {
             .expect("spawn summary thread");
     }
 
+    /// Settings → Forget voices: drops every voiceprint and name (speakers.json is deleted).
+    pub fn clear_speakers(&self) {
+        let Some(s) = &self.speakers else { return };
+        let named = s.clear();
+        let stamp = Local::now().format("%H:%M");
+        self.ui.send(UiEvent::Note(format!(
+            "All voices and names forgotten ({named} named) {stamp}; new voices start as new speakers"
+        )));
+    }
+
+    /// Settings → Voices → Forget: drops one voiceprint and its name.
+    pub fn forget_speaker(&self, speaker_id: &str) {
+        let Some(name) = self.speakers.as_ref().and_then(|s| s.forget(speaker_id)) else { return };
+        let stamp = Local::now().format("%H:%M");
+        self.ui.send(UiEvent::Note(format!("Voice \"{name}\" forgotten {stamp}; that person starts again as a new speaker")));
+    }
+
     pub fn rename_speaker(&self, speaker_id: &str, name: &str) -> Option<(String, String, String)> {
         let result = self.speakers.as_ref()?.rename(speaker_id, name)?;
         if let Err(e) = self.writer.rename(&result.0, &result.2) {

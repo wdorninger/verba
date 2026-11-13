@@ -121,7 +121,7 @@ impl Tray {
         }));
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("Transcribe: loading model...")
+            .with_tooltip("Verba: loading model...")
             .with_icon(icon(State::Loading).expect("tray icon"))
             .build()?;
         ICON.with(|i| *i.borrow_mut() = Some(icon));
@@ -145,7 +145,7 @@ impl Tray {
         if self.last.as_ref().map(|l| l.0) != Some(state) {
             ICON.with(|i| i.borrow().as_ref().map(|t| t.set_icon(icon(state))));
         }
-        let tip: String = format!("Transcribe: {status}").chars().take(127).collect();
+        let tip: String = format!("Verba: {status}").chars().take(127).collect();
         ICON.with(|i| i.borrow().as_ref().map(|t| t.set_tooltip(Some(tip))));
         self.status.set_text(&status);
         self.pause.set_text(if paused { "Resume" } else { "Pause" });

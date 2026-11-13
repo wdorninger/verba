@@ -212,6 +212,7 @@ impl Answerer {
                     core.ui.send(UiEvent::AnswerSkipped(q.qid));
                 } else {
                     log::info!("Claude answered ({took:.1}s, {model}): {}", q.text);
+                    core.writer.append_answer(&q.time, &q.label, &q.text, &model, took, &answer);
                     core.ui.send(UiEvent::AnswerDone { qid: q.qid, text: answer });
                 }
             }

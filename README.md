@@ -51,7 +51,8 @@ Speech recognition runs on your own machine: nothing leaves the computer unless 
 **Claude (optional, off at every start)**
 - **Summaries**: summary, decisions, action items and open questions, in the language of the call.
 - **Live answers**: questions asked in the call are answered in a side panel (optionally with web search), or
-  right-click any line → *Ask Claude about this*.
+  right-click any line → *Ask Claude about this*. Every answered question is also saved next to the transcript in
+  `<transcript>_answers.md` (question, who asked it, model, answer).
 - Uses your installed Claude Code CLI ([setup](#claude-setup)); nothing is sent while the switch is off.
 
 **App**
@@ -128,7 +129,7 @@ Please make sure everyone you record agrees to it.
     the window and the lines Claude sees as context), Copy all, Clear.
 - **Record mode**: the app always starts with **All audio**. Choose **Only calls** (for this session) to record only while an app uses the microphone (until 10 s after it is free again); each call then gets its own file.
 - **Stop after silence**: recording pauses by itself when no speech has been transcribed for 1 minute (Settings → *Stop recording after silence*, `[capture] auto_stop_minutes`, 0 = never). The window notes it and the tray icon turns grey; press **Resume** to continue. A new call (an app taking the microphone) resumes it automatically.
-- **Speakers**: click a speaker name to edit it in place (Enter or clicking elsewhere saves, Esc cancels); give two voices the same name to merge them. Every earlier line (window, current transcript file, context sent to Claude) changes to the new name, and every later line of that voice uses it, also lines that were still being processed and later sessions. Named voices are stored in `speakers.json`. Keep that file to yourself.
+- **Speakers**: click a speaker name to edit it in place (Enter or clicking elsewhere saves, Esc cancels); give two voices the same name to merge them. Every earlier line (window, current transcript file, context sent to Claude) changes to the new name, and every later line of that voice uses it, also lines that were still being processed and later sessions. Named voices are stored in `speakers.json`. Keep that file to yourself. Settings → *Voices* lists the known voices: *Forget* (click twice) deletes one voiceprint and name, *Forget all voices…* all of them; lines already written keep their names.
 - **Claude** (summaries and live answers through the Claude Code CLI, `claude -p`) is **always off when the app starts**. Switch it on in the window for the session; nothing is sent to Anthropic while it is off.
 - **Screenshots**: 📷 in the window or *Take screenshot* in the tray. In ⚙ Settings choose the screen (primary, all, or a specific one) and turn on **auto screenshots**: while recording, the screen is checked every `check_seconds` and saved when at least `change_percent` % of it changed since the last screenshot. Screenshots are saved in the transcript's folder (`screenshot_HH-MM-SS.png`), noted in it as `[time] [Screenshot] file.png`, and appear in the window (click to open).
 
@@ -160,7 +161,8 @@ How the app calls it:
   answers (`[answers] web_search`) only allows Claude Code's `WebSearch` tool. That tool must be available for your
   account; your organization may have disabled it.
 - Models: `[summary] model` (default `sonnet`) and `[answers] model` (default `haiku`) take the CLI's aliases
-  (`haiku`, `sonnet`, `opus`) or a full model name.
+  (`haiku`, `sonnet`, `opus`), chosen in Settings, or a full model name set in `config.toml` (Settings then shows
+  and keeps it). The same goes for `[whisper] model`.
 - Time limits: 300 s per summary, 90 s per answer (150 s with web search).
 - Sent to Anthropic: the whole transcript for a summary; the question plus the last `[answers] context_lines`
   lines for an answer.

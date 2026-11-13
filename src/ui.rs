@@ -70,7 +70,15 @@ struct Summary {
 struct SettingsDialog {
     values: BTreeMap<String, Value>,
     original: BTreeMap<String, Value>,
+    /// "Forget all voices" was clicked once; the second click confirms.
+    confirm_forget: bool,
+    /// A voice's "Forget" was clicked once (its id); the second click confirms.
+    confirm_voice: Option<String>,
+    tab: usize,
 }
+
+const SETTINGS_TABS: [&str; 5] = ["Claude", "Transcription", "Voices", "Screenshots", "Appearance"];
+const LABEL_W: f32 = 170.0;
 
 pub struct LiveApp {
     core: Arc<Core>,
@@ -426,9 +434,9 @@ impl LiveApp {
                         self.clear();
                     }
                 });
-                if ui.button("⚙").on_hover_text("Settings").clicked() {
+                if ui.button(theme::icon(theme::ICON_SETTINGS, "⚙")).on_hover_text("Settings").clicked() {
                     let values: BTreeMap<String, Value> = self.core.get_settings().into_iter().collect();
-                    self.settings = Some(SettingsDialog { original: values.clone(), values });
+                    self.settings = Some(SettingsDialog { original: values.clone(), values, confirm_forget: false, confirm_voice: None, tab: 0 });
                 }
                 let paused = self.core.manual_pause.load(Ordering::Relaxed);
                 if accent_button(ui, if paused { "Resume" } else { "Pause" }, p, state != State::Loading).clicked() {
@@ -502,7 +510,7 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
                 if ui.button("A−").clicked() {
                     self.zoom(-1.0);
                 }
-                if ui.button("📷").on_hover_text("Take a screenshot (screen and auto mode: ⚙ Settings)").clicked() {
+                if ui.button(theme::icon(theme::ICON_CAMERA, "📷")).on_hover_text("Take a screenshot (screen and auto mode: Settings → Screenshots)").clicked() {
                     crate::screenshots::capture_now(self.core.clone());
                 }
                 ui.add_space(8.0);
@@ -793,15 +801,17 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
     }
 
     fn settings_dialog(&mut self, ctx: &egui::Context, p: &Palette) {
+        let voices = self.core.speakers.as_ref().map(|s| s.list());
         let Some(d) = &mut self.settings else { return };
         let mut close = false;
         let mut save = false;
+        let mut forget_all = false;
+        let mut forget_one: Option<String> = None;
         egui::Modal::new(Id::unique("settings")).show(ctx, |ui| {
-            ui.set_width(440.0);
+            ui.set_width(400.0);
             let v = &mut d.values;
-            let section = |ui: &mut egui::Ui, t: &str| {
-                ui.add_space(8.0);
-                ui.label(RichText::new(t).font(FontId::new(15.0, theme::bold())));
+            let label = |ui: &mut egui::Ui, t: &str| {
+                ui.add_sized([LABEL_W, 22.0], Label::new(t).truncate());
             };
             let toggle = |ui: &mut egui::Ui, v: &mut BTreeMap<String, Value>, key: &str, text: &str| {
                 let mut on = v.get(key).and_then(Value::as_bool).unwrap_or(false);
@@ -809,104 +819,169 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
                     v.insert(key.into(), Value::Boolean(on));
                 }
             };
-            let choice = |ui: &mut egui::Ui, v: &mut BTreeMap<String, Value>, key: &str, text: &str, options: &[(&str, &str)], editable: bool| {
+            // One dropdown style everywhere. A value that isn't in the list (set by hand in config.toml) is
+            // shown as an extra entry, so it stays selectable and is kept on Save.
+            let choice = |ui: &mut egui::Ui, v: &mut BTreeMap<String, Value>, key: &str, text: &str, options: &[(&str, &str)]| {
                 ui.horizontal(|ui| {
-                    ui.add_sized([210.0, 22.0], Label::new(text));
+                    label(ui, text);
                     let mut current = v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    if editable {
-                        ui.add(egui::TextEdit::singleline(&mut current).desired_width(130.0));
-                        ui.menu_button("▾", |ui| {
-                            for (value, label) in options {
-                                if ui.button(*label).clicked() {
-                                    current = value.to_string();
-                                }
-                            }
-                        });
-                    } else {
-                        let shown = options.iter().find(|(val, _)| *val == current).map_or(current.clone(), |(_, l)| l.to_string());
-                        egui::ComboBox::from_id_salt(key).selected_text(shown).width(160.0).show_ui(ui, |ui| {
-                            for (value, label) in options {
-                                ui.selectable_value(&mut current, value.to_string(), *label);
-                            }
-                        });
-                    }
+                    let custom = (!options.iter().any(|(val, _)| *val == current)).then(|| current.clone());
+                    let shown = options.iter().find(|(val, _)| *val == current).map_or(current.clone(), |(_, l)| l.to_string());
+                    egui::ComboBox::from_id_salt(key).selected_text(shown).width(180.0).show_ui(ui, |ui| {
+                        if let Some(c) = &custom {
+                            ui.selectable_value(&mut current, c.clone(), c);
+                        }
+                        for (value, label) in options {
+                            ui.selectable_value(&mut current, value.to_string(), *label);
+                        }
+                    });
                     v.insert(key.into(), Value::String(current));
                 });
             };
-            let models: Vec<(&str, &str)> = MODELS.iter().map(|m| (*m, *m)).collect();
-            section(ui, "Claude");
-            toggle(ui, v, "summary.enabled", "Allow Claude usage (summaries and answers)");
-            toggle(ui, v, "answers.enabled", "Answer questions automatically");
-            choice(ui, v, "answers.model", "Answer model", &models, true);
-            toggle(ui, v, "answers.web_search", "Allow web search for answers (slower)");
-            choice(ui, v, "answers.sources", "Answer questions from", &[("all", "Everyone"), ("them", "Only others (speakers)"), ("me", "Only me (mic)")], false);
+            let hint = |ui: &mut egui::Ui, t: &str| {
+                ui.label(RichText::new(t).size(11.0).color(p.muted));
+            };
+
+            // Tabs
             ui.horizontal(|ui| {
-                ui.add_sized([210.0, 22.0], Label::new("Context lines sent with a question"));
-                let mut n = v.get("answers.context_lines").and_then(Value::as_integer).unwrap_or(15);
-                if ui.add(egui::DragValue::new(&mut n).range(5..=50)).changed() {
-                    v.insert("answers.context_lines".into(), Value::Integer(n));
+                for (i, name) in SETTINGS_TABS.iter().enumerate() {
+                    let on = d.tab == i;
+                    let text = RichText::new(*name).color(if on { p.text } else { p.muted });
+                    if ui.selectable_label(on, if on { text.strong() } else { text }).clicked() {
+                        d.tab = i;
+                    }
                 }
             });
-            choice(ui, v, "summary.model", "Summary model", &models, true);
-            toggle(ui, v, "summary.auto_after_call", "Summarize automatically after each call");
+            ui.separator();
 
-            section(ui, "Transcription");
-            let langs: Vec<(&str, &str)> = LANGUAGES.iter().map(|(n, c)| (*c, *n)).collect();
-            choice(ui, v, "whisper.language", "Language", &langs, false);
-            ui.horizontal(|ui| {
-                ui.add_sized([210.0, 22.0], Label::new("Record"));
-                let mut calls = v.get("capture.calls_only").and_then(Value::as_bool).unwrap_or(true);
-                egui::ComboBox::from_id_salt("rec").selected_text(if calls { RECORD_CALLS } else { RECORD_ALL }).width(160.0).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut calls, true, RECORD_CALLS);
-                    ui.selectable_value(&mut calls, false, RECORD_ALL);
-                });
-                v.insert("capture.calls_only".into(), Value::Boolean(calls));
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized([210.0, 22.0], Label::new("Stop recording after silence"));
-                let mut m = v.get("capture.auto_stop_minutes").and_then(|x| x.as_integer().or(x.as_float().map(|f| f.round() as i64))).unwrap_or(1);
-                let r = ui.add(egui::DragValue::new(&mut m).range(0..=240).custom_formatter(|n, _| {
-                    if n <= 0.0 { "never".into() } else { format!("{n:.0} min") }
-                }));
-                if r.on_hover_text("Pauses recording when nobody has spoken for this long; press Resume to continue. 0 = never.").changed() {
-                    v.insert("capture.auto_stop_minutes".into(), Value::Integer(m));
+            ui.vertical(|ui| {
+                ui.set_min_height(256.0); // the tallest tab (Claude), so switching tabs doesn't resize the dialog
+                match d.tab {
+                    0 => {
+                        let models: Vec<(&str, &str)> = MODELS.iter().map(|m| (*m, *m)).collect();
+                        toggle(ui, v, "summary.enabled", "Allow Claude usage (summaries and answers)");
+                        toggle(ui, v, "answers.enabled", "Answer questions automatically");
+                        toggle(ui, v, "answers.web_search", "Allow web search for answers (slower)");
+                        toggle(ui, v, "summary.auto_after_call", "Summarize automatically after each call");
+                        ui.add_space(4.0);
+                        choice(ui, v, "answers.model", "Answer model", &models);
+                        choice(ui, v, "answers.sources", "Answer questions from", &[("all", "Everyone"), ("them", "Only others (speakers)"), ("me", "Only me (mic)")]);
+                        ui.horizontal(|ui| {
+                            label(ui, "Context lines per question");
+                            let mut n = v.get("answers.context_lines").and_then(Value::as_integer).unwrap_or(15);
+                            if ui.add(egui::DragValue::new(&mut n).range(5..=50)).changed() {
+                                v.insert("answers.context_lines".into(), Value::Integer(n));
+                            }
+                        });
+                        choice(ui, v, "summary.model", "Summary model", &models);
+                    }
+                    1 => {
+                        let langs: Vec<(&str, &str)> = LANGUAGES.iter().map(|(n, c)| (*c, *n)).collect();
+                        choice(ui, v, "whisper.language", "Language", &langs);
+                        ui.horizontal(|ui| {
+                            label(ui, "Record");
+                            let mut calls = v.get("capture.calls_only").and_then(Value::as_bool).unwrap_or(true);
+                            egui::ComboBox::from_id_salt("rec").selected_text(if calls { RECORD_CALLS } else { RECORD_ALL }).width(180.0).show_ui(ui, |ui| {
+                                ui.selectable_value(&mut calls, true, RECORD_CALLS);
+                                ui.selectable_value(&mut calls, false, RECORD_ALL);
+                            });
+                            v.insert("capture.calls_only".into(), Value::Boolean(calls));
+                        });
+                        ui.horizontal(|ui| {
+                            label(ui, "Stop after silence");
+                            let mut m = v.get("capture.auto_stop_minutes").and_then(|x| x.as_integer().or(x.as_float().map(|f| f.round() as i64))).unwrap_or(1);
+                            let r = ui.add(egui::DragValue::new(&mut m).range(0..=240).custom_formatter(|n, _| {
+                                if n <= 0.0 { "never".into() } else { format!("{n:.0} min") }
+                            }));
+                            if r.on_hover_text("Pauses recording when nobody has spoken for this long; press Resume to continue. 0 = never.").changed() {
+                                v.insert("capture.auto_stop_minutes".into(), Value::Integer(m));
+                            }
+                        });
+                        let wm: Vec<(&str, &str)> = WHISPER_MODELS.iter().map(|m| (*m, *m)).collect();
+                        choice(ui, v, "whisper.model", "Whisper model", &wm);
+                        choice(ui, v, "whisper.backend", "Run on", &[("gpu", "Intel GPU (OpenVINO)"), ("cpu", "CPU (whisper.cpp)")]);
+                        ui.horizontal(|ui| {
+                            ui.add_space(LABEL_W + 8.0);
+                            hint(ui, "model and engine change after a restart");
+                        });
+                    }
+                    2 => match &voices {
+                        None => hint(ui, "Voice recognition is off ([speakers] enabled = false in config.toml)."),
+                        Some(voices) => {
+                            ui.horizontal(|ui| {
+                                label(ui, "Match threshold");
+                                let mut t = v.get("speakers.threshold").and_then(|x| x.as_float().or(x.as_integer().map(|i| i as f64))).unwrap_or(0.75);
+                                let r = ui.add(egui::DragValue::new(&mut t).range(0.5..=0.95).speed(0.01).fixed_decimals(2));
+                                if r.on_hover_text("Higher = stricter (one person may split in two); lower = different people may be merged.").changed() {
+                                    v.insert("speakers.threshold".into(), Value::Float((t * 100.0).round() / 100.0));
+                                }
+                            });
+                            ui.add_space(4.0);
+                            hint(ui, "Named voices are remembered between sessions; Speaker N only for this one. Forgetting cannot be undone; lines already written keep their names.");
+                            ui.add_space(2.0);
+                            egui::Frame::NONE.stroke(egui::Stroke::new(1.0, p.muted.gamma_multiply(0.4))).corner_radius(4.0).inner_margin(Margin::same(6)).show(ui, |ui| {
+                                egui::ScrollArea::vertical().max_height(120.0).auto_shrink([false, true]).show(ui, |ui| {
+                                    if voices.is_empty() {
+                                        hint(ui, "No voices yet.");
+                                    }
+                                    for (id, name, named) in voices {
+                                        ui.horizontal(|ui| {
+                                            ui.label(name);
+                                            if !named {
+                                                hint(ui, "(this session)");
+                                            }
+                                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                let confirming = d.confirm_voice.as_deref() == Some(id.as_str());
+                                                if ui.small_button(if confirming { "Click again" } else { "Forget" }).clicked() {
+                                                    if confirming {
+                                                        forget_one = Some(id.clone());
+                                                        d.confirm_voice = None;
+                                                    } else {
+                                                        d.confirm_voice = Some(id.clone());
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    }
+                                });
+                            });
+                            ui.add_space(6.0);
+                            let text = if d.confirm_forget { "Click again to forget all" } else { "Forget all voices…" };
+                            let r = ui.add_enabled(!voices.is_empty(), egui::Button::new(text));
+                            if r.on_hover_text("Deletes every stored voiceprint and name (speakers.json).").clicked() {
+                                if d.confirm_forget {
+                                    forget_all = true;
+                                    d.confirm_forget = false;
+                                } else {
+                                    d.confirm_forget = true;
+                                }
+                            }
+                        }
+                    },
+                    3 => {
+                        let screens = crate::screenshots::monitor_choices();
+                        let screens: Vec<(&str, &str)> = screens.iter().map(|(k, l)| (k.as_str(), l.as_str())).collect();
+                        if let Some(Value::Integer(n)) = v.get("screenshots.monitor").cloned() {
+                            v.insert("screenshots.monitor".into(), Value::String(n.to_string())); // a number written without quotes
+                        }
+                        choice(ui, v, "screenshots.monitor", "Screen to capture", &screens);
+                        toggle(ui, v, "screenshots.auto", "Auto screenshot when the screen changes");
+                        ui.horizontal(|ui| {
+                            label(ui, "Change needed");
+                            let mut pct = v.get("screenshots.change_percent").and_then(|x| x.as_integer().or(x.as_float().map(|f| f as i64))).unwrap_or(10);
+                            if ui.add(egui::DragValue::new(&mut pct).range(1..=100).suffix(" %")).changed() {
+                                v.insert("screenshots.change_percent".into(), Value::Integer(pct));
+                            }
+                        });
+                        hint(ui, "Auto screenshots are taken while recording, when this share of the screen differs from the last one.");
+                    }
+                    _ => {
+                        choice(ui, v, "ui.theme", "Theme", &[("system", "Follow Windows"), ("light", "Light"), ("dark", "Dark")]);
+                    }
                 }
             });
-            let wm: Vec<(&str, &str)> = WHISPER_MODELS.iter().map(|m| (*m, *m)).collect();
-            choice(ui, v, "whisper.model", "Whisper model", &wm, true);
-            choice(ui, v, "whisper.backend", "Run on", &[("gpu", "Intel GPU (OpenVINO)"), ("cpu", "CPU (whisper.cpp)")], false);
-            ui.horizontal(|ui| {
-                ui.add_space(218.0);
-                ui.label(RichText::new("takes effect after restart").size(11.0).color(p.muted));
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized([210.0, 22.0], Label::new("Speaker match threshold"));
-                let mut t = v.get("speakers.threshold").and_then(|x| x.as_float().or(x.as_integer().map(|i| i as f64))).unwrap_or(0.75);
-                if ui.add(egui::DragValue::new(&mut t).range(0.5..=0.95).speed(0.01).fixed_decimals(2)).changed() {
-                    v.insert("speakers.threshold".into(), Value::Float((t * 100.0).round() / 100.0));
-                }
-            });
 
-            section(ui, "Screenshots");
-            let screens = crate::screenshots::monitor_choices();
-            let screens: Vec<(&str, &str)> = screens.iter().map(|(k, l)| (k.as_str(), l.as_str())).collect();
-            if let Some(Value::Integer(n)) = v.get("screenshots.monitor").cloned() {
-                v.insert("screenshots.monitor".into(), Value::String(n.to_string())); // a number written without quotes
-            }
-            choice(ui, v, "screenshots.monitor", "Screen to capture", &screens, false);
-            toggle(ui, v, "screenshots.auto", "Auto screenshot while recording when the screen changes");
-            ui.horizontal(|ui| {
-                ui.add_sized([210.0, 22.0], Label::new("Auto: screen change needed (%)"));
-                let mut pct = v.get("screenshots.change_percent").and_then(|x| x.as_integer().or(x.as_float().map(|f| f as i64))).unwrap_or(10);
-                if ui.add(egui::DragValue::new(&mut pct).range(1..=100).suffix(" %")).changed() {
-                    v.insert("screenshots.change_percent".into(), Value::Integer(pct));
-                }
-            });
-
-            section(ui, "Appearance");
-            choice(ui, v, "ui.theme", "Theme", &[("system", "Follow Windows"), ("light", "Light"), ("dark", "Dark")], false);
-
-            ui.add_space(14.0);
+            ui.separator();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if accent_button(ui, "Save", p, true).clicked() {
                     save = true;
@@ -916,6 +991,12 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
                 }
             });
         });
+        if forget_all {
+            self.core.clear_speakers();
+        }
+        if let Some(id) = forget_one {
+            self.core.forget_speaker(&id);
+        }
         if !(save || close) {
             return;
         }
