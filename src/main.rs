@@ -17,6 +17,7 @@ mod screenshots;
 mod segmenter;
 mod speakers;
 mod theme;
+mod toast;
 mod transcriber;
 mod tray;
 mod ui;

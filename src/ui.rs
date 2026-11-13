@@ -998,9 +998,15 @@ impl eframe::App for LiveApp {
                 // Closing just hides the window; Quit is in the tray menu. Say so, or it looks like it quit.
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(ViewportCommand::Visible(false));
-                crate::tray::notify(
-                    "Transcribe is still running",
-                    "It keeps running in the system tray. Double-click the tray icon to open the window, or right-click it and choose Quit.",
+                let ctx2 = ctx.clone();
+                crate::toast::show(
+                    "Verba is still running",
+                    "It keeps recording in the system tray. Click here or the tray icon to open the window; quit from the tray menu.",
+                    theme::palette(ui.style().visuals.dark_mode),
+                    move || {
+                        Self::show_window(&ctx2);
+                        ctx2.request_repaint();
+                    },
                 );
             } else {
                 self.quitting = true;
