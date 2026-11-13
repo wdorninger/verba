@@ -93,6 +93,7 @@ pub fn run(core: Arc<Core>) {
                 core.on_call(None);
             }
         }
+        core.check_silence();
         std::thread::sleep(POLL);
     }
 }

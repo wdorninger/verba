@@ -862,6 +862,16 @@ Set [whisper] backend = \"gpu\" (or ⚙ Settings → Run on) for faster transcri
                 });
                 v.insert("capture.calls_only".into(), Value::Boolean(calls));
             });
+            ui.horizontal(|ui| {
+                ui.add_sized([210.0, 22.0], Label::new("Stop recording after silence"));
+                let mut m = v.get("capture.auto_stop_minutes").and_then(|x| x.as_integer().or(x.as_float().map(|f| f.round() as i64))).unwrap_or(1);
+                let r = ui.add(egui::DragValue::new(&mut m).range(0..=240).custom_formatter(|n, _| {
+                    if n <= 0.0 { "never".into() } else { format!("{n:.0} min") }
+                }));
+                if r.on_hover_text("Pauses recording when nobody has spoken for this long; press Resume to continue. 0 = never.").changed() {
+                    v.insert("capture.auto_stop_minutes".into(), Value::Integer(m));
+                }
+            });
             let wm: Vec<(&str, &str)> = WHISPER_MODELS.iter().map(|m| (*m, *m)).collect();
             choice(ui, v, "whisper.model", "Whisper model", &wm, true);
             choice(ui, v, "whisper.backend", "Run on", &[("gpu", "Intel GPU (OpenVINO)"), ("cpu", "CPU (whisper.cpp)")], false);

@@ -71,6 +71,7 @@ pub const SETTING_KEYS: &[&str] = &[
     "whisper.model",
     "whisper.backend",
     "capture.calls_only",
+    "capture.auto_stop_minutes",
     "speakers.threshold",
     "screenshots.monitor",
     "screenshots.auto",
@@ -86,6 +87,10 @@ pub struct Core {
     pub manual_pause: AtomicBool,
     pub calls_only: AtomicBool,
     pub call_app: Mutex<Option<String>>,
+    /// Last transcribed line, or when recording (re)started: drives the auto stop after silence.
+    last_speech: Mutex<Instant>,
+    /// The current pause came from silence, not the user: a new call lifts it.
+    silence_paused: AtomicBool,
     loaded: AtomicBool,
     error: Mutex<Option<String>>,
     delay: AtomicU32,
@@ -133,6 +138,8 @@ impl Core {
             manual_pause: AtomicBool::new(false),
             calls_only: AtomicBool::new(cfg.bool("capture", "calls_only")),
             call_app: Mutex::new(None),
+            last_speech: Mutex::new(Instant::now()),
+            silence_paused: AtomicBool::new(false),
             loaded: AtomicBool::new(false),
             error: Mutex::new(None),
             delay: AtomicU32::new(0),
@@ -267,6 +274,7 @@ impl Core {
         let time = start.format("%H:%M:%S").to_string();
         let line = format!("[{time}] [{label}] {text}");
         log::info!("{line}");
+        *self.last_speech.lock().unwrap() = Instant::now();
         self.writer.append(&line);
         self.ui.send(UiEvent::Line {
             time: time.clone(),
@@ -277,9 +285,32 @@ impl Core {
         self.answerer.on_line(self, source, &time, label, text);
     }
 
+    /// Pauses recording after `capture.auto_stop_minutes` without a transcribed line (0 = never).
+    /// Called every few seconds; the time only counts while actually recording.
+    pub fn check_silence(&self) {
+        let minutes = self.cfg.lock().unwrap().f64("capture", "auto_stop_minutes");
+        let mut last = self.last_speech.lock().unwrap();
+        if self.state() != State::Recording || minutes <= 0.0 {
+            *last = Instant::now();
+            return;
+        }
+        if last.elapsed() < Duration::from_secs_f64(minutes * 60.0) {
+            return;
+        }
+        *last = Instant::now();
+        drop(last);
+        log::info!("No speech for {minutes} min: recording paused");
+        self.manual_pause.store(true, Ordering::Relaxed);
+        self.silence_paused.store(true, Ordering::Relaxed);
+        self.apply_pause();
+        let stamp = Local::now().format("%H:%M");
+        self.ui.send(UiEvent::Note(format!("Recording paused after {minutes} min of silence {stamp} (press Resume to continue)")));
+    }
+
     // --- actions ---
     pub fn toggle_pause(&self) {
         self.manual_pause.fetch_xor(true, Ordering::Relaxed);
+        self.silence_paused.store(false, Ordering::Relaxed);
         self.apply_pause();
     }
 
@@ -298,6 +329,9 @@ impl Core {
         let stamp = Local::now().format("%H:%M");
         match (&previous, &app) {
             (None, Some(app)) => {
+                if self.silence_paused.swap(false, Ordering::Relaxed) {
+                    self.manual_pause.store(false, Ordering::Relaxed); // a new call: record again
+                }
                 if self.calls_only.load(Ordering::Relaxed) {
                     self.writer.new_file(app);
                 }

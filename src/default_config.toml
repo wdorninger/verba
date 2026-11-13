@@ -11,6 +11,7 @@ catchup_seconds = 30 # cpu only: if this far behind, use the fast "base" model u
 mic = true           # [Me]
 speakers = true      # [Them] — everything played through the default output device
 calls_only = false   # always "All audio" at startup; "Only calls" (record only while an app uses the mic) can be chosen per session
+auto_stop_minutes = 1  # pause recording after this many minutes without speech (0 = never); "Resume" starts again
 
 [segmenter]
 silence_seconds = 0.8     # pause length that ends a chunk (lower = faster, but more mid-sentence cuts)
